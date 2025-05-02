@@ -1,0 +1,154 @@
+
+import os
+import tempfile
+import streamlit as st
+import pandas as pd
+import numpy as np
+
+from file_checker import checkFile, extract_info
+
+# ───────────────────────────────────────────────────────────────────────────────
+# Page config
+# ───────────────────────────────────────────────────────────────────────────────
+st.set_page_config(
+    page_title="🛡️ Malware Detector",
+    page_icon="🦠",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# ───────────────────────────────────────────────────────────────────────────────
+# Sidebar
+# ───────────────────────────────────────────────────────────────────────────────
+with st.sidebar:
+    st.title("🛠️ Tools")
+    st.write(
+        """
+        **Malware Detection App**  
+        Upload Windows PE files (.exe, .dll) and get a verdict.  
+        Powered by a Random Forest trained on PE‐header & section features.
+        """
+    )
+    st.markdown("---")
+    st.write("**Built by:** Senior Research Analyst")
+    st.write("© 2025")
+
+# ───────────────────────────────────────────────────────────────────────────────
+# Tabs
+# ───────────────────────────────────────────────────────────────────────────────
+tab_scan, tab_explore, tab_about = st.tabs([
+    "🧪 Scan Files",
+    "🔍 Explore Features",
+    "ℹ️ About"
+])
+
+# ───────────────────────────────────────────────────────────────────────────────
+# Tab 1: Batch Scan
+# ───────────────────────────────────────────────────────────────────────────────
+with tab_scan:
+    st.header("🧪 Batch Malware Scan")
+    col1, col2 = st.columns([2, 3])
+
+    with col1:
+        uploads = st.file_uploader(
+            "➕ Upload PE file(s) (.exe, .dll):",
+            type=["exe", "dll"],
+            accept_multiple_files=True,
+            help="Select one or more files to scan."
+        )
+        start = st.button("▶️ Start Scan")
+
+    if uploads and start:
+        results = []
+        progress = st.progress(0)
+        total = len(uploads)
+
+        for idx, f in enumerate(uploads, start=1):
+            # write to temp file
+            suffix = os.path.splitext(f.name)[1]
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                tmp.write(f.read())
+                tmp_path = tmp.name
+
+            # extract features & predict
+            feats = extract_info(tmp_path)
+            pred = checkFile(tmp_path)
+            os.remove(tmp_path)
+
+            results.append({
+                "Filename": f.name,
+                "Prediction": "LEGITIMATE" if pred else "MALWARE"
+            })
+            progress.progress(idx / total)
+
+        df_res = pd.DataFrame(results)
+        legit_count = (df_res.Prediction == "LEGITIMATE").sum()
+        mal_count = (df_res.Prediction == "MALWARE").sum()
+
+        st.metric("Total scanned", total)
+        st.metric("Legitimate", legit_count, delta=legit_count - total)
+        st.metric("Malicious", mal_count, delta=mal_count)
+
+        st.markdown("### Results")
+        st.dataframe(df_res, use_container_width=True)
+
+        csv = df_res.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label="📥 Download results as CSV",
+            data=csv,
+            file_name="scan_results.csv",
+            mime="text/csv"
+        )
+
+# ───────────────────────────────────────────────────────────────────────────────
+# Tab 2: Single File Feature Explorer
+# ───────────────────────────────────────────────────────────────────────────────
+with tab_explore:
+    st.header("🔍 Single File Feature Explorer")
+    single = st.file_uploader(
+        "Upload a single PE file:", type=["exe", "dll"], key="explore"
+    )
+    if single:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(single.name)[1]) as tmp:
+            tmp.write(single.read())
+            tmp_path = tmp.name
+
+        st.info("Extracting features…")
+        feats = extract_info(tmp_path)
+        os.remove(tmp_path)
+
+        if feats:
+            df_feat = pd.DataFrame.from_dict(feats, orient="index", columns=["Value"])
+            st.dataframe(df_feat, use_container_width=True)
+            csv = df_feat.to_csv(header=False).encode("utf-8")
+            st.download_button(
+                label="📥 Download features as CSV",
+                data=csv,
+                file_name=f"{single.name}_features.csv",
+                mime="text/csv"
+            )
+        else:
+            st.error("⚠️ Invalid PE file or extraction error.")
+
+# ───────────────────────────────────────────────────────────────────────────────
+# Tab 3: About
+# ───────────────────────────────────────────────────────────────────────────────
+with tab_about:
+    st.header("ℹ️ About This App")
+    st.markdown("""
+    **Malware Detection**  
+    This app uses a Random Forest classifier trained on over 50 extracted PE‐header and section features,  
+    including entropy, import/export statistics, resource analysis, and version info.
+
+    **Workflow**  
+    1. Upload Windows PE files  
+    2. Extract header, section & resource features  
+    3. Compute entropy & other metrics  
+    4. Classify using Random Forest  
+
+    **References**  
+    - Research Paper: *Smith et al., 2024*, “PE‐Feature‐Based Malware Classification”  
+    - GitHub: https://github.com/YourLab/malware-detector  
+
+    **Contact**: analyst@yourlab.org
+    """)
